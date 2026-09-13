@@ -17,21 +17,40 @@ export default function BookingWizard() {
   // Tell the parent Webflow page how tall this content is, so a fixed-height
   // iframe never clips the wizard. The Webflow embed's script listens for
   // this message and resizes the iframe to match (see the embed snippet).
+  // Debounced: an embedding page's own scrollbar can appear/disappear as the
+  // iframe height changes, which nudges the iframe's width by a scrollbar's
+  // worth of pixels and can re-trigger the grid layout on Step 1 — without
+  // debouncing, that feedback loop can settle on a too-small height that
+  // clips the Continue button with nothing left to trigger a recovery resize.
   useEffect(() => {
     if (!rootRef.current || typeof window === 'undefined' || window.parent === window) return;
+    let raf = 0;
+    let timer = 0;
     const send = () => {
       const h = rootRef.current ? rootRef.current.scrollHeight : 0;
+      if (h < 200) return; // ignore transient near-zero measurements
       window.parent.postMessage({ type: 'reign-booking-height', height: h }, '*');
     };
-    send();
-    const ro = new ResizeObserver(send);
+    const scheduleSend = () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      raf = requestAnimationFrame(() => {
+        timer = window.setTimeout(send, 120);
+      });
+    };
+    scheduleSend();
+    const ro = new ResizeObserver(scheduleSend);
     ro.observe(rootRef.current);
-    window.addEventListener('resize', send);
+    window.addEventListener('resize', scheduleSend);
+    window.addEventListener('load', scheduleSend);
     return () => {
       ro.disconnect();
-      window.removeEventListener('resize', send);
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      window.removeEventListener('resize', scheduleSend);
+      window.removeEventListener('load', scheduleSend);
     };
-  }, [b.step, b.sent]);
+  }, []);
 
   return (
     <div ref={rootRef}>
